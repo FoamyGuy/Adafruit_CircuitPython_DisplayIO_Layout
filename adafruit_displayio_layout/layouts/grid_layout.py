@@ -109,7 +109,7 @@ class GridLayout(displayio.Group):
         """Add a child to the grid.
 
         :param cell_content: the content to add to this cell e.g. label, button, etc...
-         Group subclass that have width and height properties can be used.
+         Group subclasses that have width and height properties can be used.
         :param tuple grid_position: where in the grid it should go. Tuple with
          x,y coordinates in grid cells. e.g. (1,0)
         :param tuple cell_size: the size and shape that the new cell should
