@@ -4,6 +4,7 @@
 """
 Make a PageLayout and illustrate all of it's features
 """
+# pylint: disable-all
 import time
 import displayio
 import board
@@ -14,7 +15,6 @@ from adafruit_display_text.bitmap_label import Label
 from adafruit_display_shapes.rect import Rect
 from adafruit_display_shapes.circle import Circle
 from adafruit_display_shapes.triangle import Triangle
-from adafruit_bitmap_font import bitmap_font
 from adafruit_displayio_layout.layouts.tab_layout import TabLayout
 
 
@@ -41,31 +41,39 @@ months = {
 
 use_txt_in_month = True
 use_usa_notation = True
+use_ntp = True
 
 i2c = board.I2C()
 
-dev_list = []
-try:
+if my_debug:
     while not i2c.try_lock():
-        i2c.try_lock()
-        time.sleep(0.5)
-    print("Start scan for connected I2C devices...")
-    dev_list = i2c.scan()
-    if dev_list is not None:
-        le = len(dev_list)
-        print("{} I2C device{} found:".format(le, "s" if le > 1 else ""))
-        for i in range(le):
-            print("Device {:d} at address 0x{:02x}".format(i, dev_list[i]))
-    i2c.unlock()
-    print("End of i2c scan")
-except Exception:
-    raise
+        pass
+
+    try:
+        while True:
+            print(
+                "I2C addresses found:",
+                [hex(device_address) for device_address in i2c.scan()],
+            )
+            time.sleep(2)
+            break
+
+    finally:  # unlock the i2c bus when ctrl-c'ing out of the loop
+        i2c.unlock()
+
 
 lStart = True
 rtc_present = None
 rtc = None
+o_secs = 0  # old seconds
+c_secs = 0  # current seconds
 
-temp_sensor_present = None
+# used to flag when more or less static elements in datetime stamp have to be refreshed
+dt_refresh = True
+
+sDT_old = ""
+
+t_sensor_present = None
 tmp117 = None
 t0 = None
 t1 = None
@@ -74,8 +82,10 @@ t2 = None
 degs_sign = chr(186)  # I preferred the real degrees sign which is: chr(176)
 
 content_sensor_idx = None
-page_3_lbl_default = "The third page is fun!"
-page_4_lbl_default = "The fourth page is where it's at"
+pge3_lbl_dflt = "The third page is fun!"
+pge4_lbl_dflt = "The fourth page is where it's at"
+
+online_time_present = None
 
 last_angle_value = 100  # Stores the value last read by the sensor
 cur_angle_value = 0
@@ -111,69 +121,69 @@ test_page_layout = TabLayout(
 )
 
 # make 3 pages of content
-page_1_group = displayio.Group()
-page_2_group = displayio.Group()
-page_3_group = displayio.Group()
-page_4_group = displayio.Group()
+pge1_group = displayio.Group()
+pge2_group = displayio.Group()
+pge3_group = displayio.Group()
+pge4_group = displayio.Group()
 
 # labels
-page_1_lbl = Label(
+pge1_lbl = Label(
     font=terminalio.FONT,
     scale=2,
     text="This is the first page!",
     anchor_point=(0, 0),
     anchored_position=(10, 10),
 )
-page_1_lbl2 = Label(
+pge1_lbl2 = Label(
     font=terminalio.FONT,
     scale=2,
     text="Please wait...",
     anchor_point=(0, 0),
     anchored_position=(10, 150),
 )
-page_2_lbl = Label(
+pge2_lbl = Label(
     font=terminalio.FONT,
     scale=2,
     text="This page is the second page!",
     anchor_point=(0, 0),
     anchored_position=(10, 10),
 )
-page_3_lbl = Label(
+pge3_lbl = Label(
     font=terminalio.FONT,
     scale=2,
-    text=page_3_lbl_default,  # Will be "Date/time:"
+    text=pge3_lbl_dflt,  # Will be "Date/time:"
     anchor_point=(0, 0),
     anchored_position=(10, 10),
 )
-page_3_lbl2 = Label(
+pge3_lbl2 = Label(
     font=terminalio.FONT,
     scale=2,
-    text="",  # page_3_lbl2_default,   # Will be DD-MO-YYYY or Month-DD-YYYY
+    text="",  # pge3_lbl2_dflt,   # Will be DD-MO-YYYY or Month-DD-YYYY
     anchor_point=(0, 0),
     anchored_position=(10, 40),
 )
-page_3_lbl3 = Label(
+pge3_lbl3 = Label(
     font=terminalio.FONT,
     scale=2,
-    text="",  # page_3_lbl3_default,  # Will be HH:MM:SS
+    text="",  # pge3_lbl3_dflt,  # Will be HH:MM:SS
     anchor_point=(0, 0),
     anchored_position=(10, 70),
 )
-page_4_lbl = Label(
+pge4_lbl = Label(
     font=terminalio.FONT,
     scale=2,
-    text=page_4_lbl_default,
+    text=pge4_lbl_dflt,
     anchor_point=(0, 0),
     anchored_position=(10, 10),
 )
-page_4_lbl2 = Label(
+pge4_lbl2 = Label(
     font=terminalio.FONT,
     scale=2,
     text="",  # Will be "Temperature"
     anchor_point=(0, 0),
     anchored_position=(10, 130),
 )
-page_4_lbl3 = Label(
+pge4_lbl3 = Label(
     font=terminalio.FONT,
     scale=2,
     text="",  # Will be  "xx.yy C"
@@ -192,27 +202,27 @@ triangle.x = 80
 triangle.y = 70
 
 # add everything to their page groups
-page_1_group.append(square)
-page_1_group.append(page_1_lbl)
-page_1_group.append(page_1_lbl2)
-page_2_group.append(page_2_lbl)
-page_2_group.append(circle)
-page_3_group.append(page_3_lbl)
-page_3_group.append(page_3_lbl2)
-page_3_group.append(page_3_lbl3)
-page_3_group.append(triangle)
-page_4_group.append(page_4_lbl)
-page_4_group.append(page_4_lbl2)
-page_4_group.append(page_4_lbl3)
-page_4_group.append(rectangle)
+pge1_group.append(square)
+pge1_group.append(pge1_lbl)
+pge1_group.append(pge1_lbl2)
+pge2_group.append(pge2_lbl)
+pge2_group.append(circle)
+pge3_group.append(pge3_lbl)
+pge3_group.append(pge3_lbl2)
+pge3_group.append(pge3_lbl3)
+pge3_group.append(triangle)
+pge4_group.append(pge4_lbl)
+pge4_group.append(pge4_lbl2)
+pge4_group.append(pge4_lbl3)
+pge4_group.append(rectangle)
 
 pages = {0: "One", 1: "Two", 2: "Thr", 3: "For"}
 
 # add the pages to the layout, supply your own page names
-test_page_layout.add_content(page_1_group, pages[0])
-test_page_layout.add_content(page_2_group, pages[1])
-test_page_layout.add_content(page_3_group, pages[2])
-test_page_layout.add_content(page_4_group, pages[3])
+test_page_layout.add_content(pge1_group, pages[0])
+test_page_layout.add_content(pge2_group, pages[1])
+test_page_layout.add_content(pge3_group, pages[2])
+test_page_layout.add_content(pge4_group, pages[3])
 
 # test_page_layout.add_content(displayio.Group(), "page_5")
 
@@ -242,8 +252,9 @@ print("showing page name: {}".format(test_page_layout.showing_page_name))
 time.sleep(5)
 
 """
-another_text = Label(terminalio.FONT, text="And another thing!", scale=2, color=0x00ff00, anchor_point=(0, 0),
-                     anchored_position=(100, 100))
+another_text = Label(terminalio.FONT, text="And another thing!", scale=2, \
+    color=0x00ff00, anchor_point=(0, 0),
+    anchored_position=(100, 100))
 test_page_layout.showing_page_content.append(another_text)
 """
 print("starting loop")
@@ -253,15 +264,15 @@ old_temp = 0.00
 """
   If the temperature sensor has been disconnected,
   this function will try to reconnect (test if the sensor is present by now)
-  If reconnected this function sets the global variable temp_sensor_present
-  If failed to reconnect the function clears temp_sensor_present
+  If reconnected this function sets the global variable t_sensor_present
+  If failed to reconnect the function clears t_sensor_present
 """
 
 
 def connect_temp_sensor():
-    global temp_sensor_present, tmp117, t0, t1, t2
+    global t_sensor_present, tmp117, t0, t1, t2
     t = "temperature sensor found"
-    temp_sensor_present = False
+    t_sensor_present = False
     tmp117 = None
 
     try:
@@ -270,9 +281,9 @@ def connect_temp_sensor():
         pass
 
     if tmp117 is not None:
-        temp_sensor_present = True
+        t_sensor_present = True
 
-    if temp_sensor_present:
+    if t_sensor_present:
         print(t)
         print("temperature sensor connected")
         t0 = "Temperature"
@@ -316,26 +327,25 @@ def connect_rtc():
         print("Failed to connect RTC")
 
 
+temp_in_REPL = False
 """
    Function gets a value from the external temperature sensor
    It only updates if the value has changed compared to the previous value
-   If no value obtained (for instance if the sensor is disconnected) the function sets the page_4 label to a default text
+   If no value obtained (for instance if the sensor is disconnected)
+   the function sets the page_4 label to a default text
 """
 
 
-def get_temp(cnt):
-    global temp_sensor_present, old_temp, tmp117, page_4_lbl, page_4_lbl2, page_4_lbl3, temp_shown_in_REPL
+def get_temp():
+    global t_sensor_present, old_temp, tmp117, pge4_lbl, pge4_lbl2, pge4_lbl3, temp_in_REPL
     showing_page_idx = test_page_layout.showing_page_index
     RetVal = False
-    if temp_sensor_present:
+    if t_sensor_present:
         try:
-            # Display temperature only after at least one time the standard page_4_lbl_default has been displayed
-            # if cnt >= 3 and showing_page_idx == 3: # show temperature on most right Tab page
-            # if cnt > 0 and cnt % 5 == 0:  # show temp only after from loop 6 and then every 5 loops
             temp = tmp117.temperature
             t = "{:5.2f} ".format(temp) + t1
-            if my_debug and temp is not None and not temp_shown_in_REPL:
-                temp_shown_in_REPL = True
+            if my_debug and temp is not None and not temp_in_REPL:
+                temp_in_REPL = True
                 print("get_temp(): {} {}".format(t0, t))
             if showing_page_idx == 3:  # show temperature on most right Tab page
                 if temp is not None:
@@ -344,24 +354,24 @@ def get_temp(cnt):
                     ):  # Only update if there is a change in temperature
                         old_temp = temp
                         t = "{:5.2f} ".format(temp) + t1
-                        page_4_lbl.text = ""
-                        page_4_lbl2.text = t0
-                        page_4_lbl3.text = t
+                        pge4_lbl.text = ""
+                        pge4_lbl2.text = t0
+                        pge4_lbl3.text = t
                         # if not my_debug:
-                        # print("page_4_lbl.text = {}".format(page_4_lbl.text))
+                        # print("pge4_lbl.text = {}".format(pge4_lbl.text))
                         # time.sleep(2)
                         RetVal = True
                 else:
                     t = ""
-                    page_4_lbl.text = page_4_lbl_default
+                    pge4_lbl.text = pge4_lbl_dflt
         except OSError:
             print("Temperature sensor has disconnected")
             t = ""
-            temp_sensor_present = False
+            t_sensor_present = False
             tmp117 = None
-            page_4_lbl.text = page_4_lbl_default  # clean the line  (eventually: t2)
-            page_4_lbl2.text = ""
-            page_4_lbl3.text = ""
+            pge4_lbl.text = pge4_lbl_dflt  # clean the line  (eventually: t2)
+            pge4_lbl2.text = ""
+            pge4_lbl3.text = ""
 
     return RetVal
 
@@ -375,6 +385,66 @@ ss = 5
 
 
 """
+    Function called by get_dt()
+    Created to repair pylint error R0912: Too many branches (13/12)
+"""
+
+
+def handle_dt(dt):
+    RetVal = False
+    s = "Date/time: "
+    sYY = str(dt[yy])
+    sMO = (
+        months[dt[mo]]
+        if use_txt_in_month
+        else "0" + str(dt[mo])
+        if dt[mo] < 10
+        else str(dt[mo])
+    )
+
+    dt_dict = {}
+
+    for _ in range(dd, ss + 1):
+        dt_dict[_] = "0" + str(dt[_]) if dt[_] < 10 else str(dt[_])
+
+    if my_debug:
+        print("dt_dict = ", dt_dict)
+
+    c_secs = dt_dict[ss]
+    sDT = (
+        sMO + "-" + dt_dict[dd] + "-" + sYY
+        if use_usa_notation
+        else sYY + "-" + sMO + "-" + dt_dict[dd]
+    )
+
+    if sDT_old != sDT:
+        sDT_old = sDT
+        dt_refresh = True  # The date has changed, set the refresh flag
+    sDT2 = dt_dict[hh] + ":" + dt_dict[mm] + ":" + dt_dict[ss]
+
+    if dt_refresh:  # only refresh when needed
+        dt_refresh = False
+        pge3_lbl.text = s
+        pge3_lbl2.text = sDT
+
+    if c_secs != o_secs:
+        o_secs = c_secs
+        sDT3 = s + "{} {}".format(sDT, sDT2)
+        print(sDT3)
+
+        pge3_lbl3.text = sDT2
+        if my_debug:
+            print("pge3_lbl.text = {}".format(pge3_lbl.text))
+            print("pge3_lbl2.text = {}".format(pge3_lbl2.text))
+            print("pge3_lbl3.text = {}".format(pge3_lbl3.text))
+        RetVal = True
+
+    # Return from here with a False but don't set the pge3_lbl to default.
+    # It is only to say to the loop() that we did't update the datetime
+    return RetVal
+
+
+"""
    Function gets the date and time:
    a) if an rtc is present from the rtc;
    b) if using online NTP pool server then get the date and time from the function time.localtime
@@ -385,10 +455,10 @@ ss = 5
 
 
 def get_dt():
-    global rtc_present, rtc, use_txt_in_month, use_usa_notation, page_3_lbl, page_3_lbl2, page_3_lbl3, online_time_present, use_ntp, old_seconds, current_seconds, dt_refresh, sDT_old, ntp_refresh, nHH_old
+    global rtc_present, rtc, pge3_lbl, pge3_lbl2, pge3_lbl3, o_secs, c_secs, dt_refresh, sDT_old
     dt = None
     RetVal = False
-    s = "Date/time: "
+
     if rtc_present:
         try:
             dt = rtc.datetime
@@ -398,82 +468,23 @@ def get_dt():
             if exc.args[0] == 5:  # Input/output error
                 rtc_present = False
                 print("get_dt(): OSError occurred. RTC probably is disconnected")
-                page_3_lbl.text = page_3_lbl_default
+                pge3_lbl.text = pge3_lbl_dflt
                 return RetVal
             raise  # Handle other errors
+
     elif online_time_present or use_ntp:
         dt = time.localtime()
+
     if dt is not None:
-        sYY = str(dt[yy])
-        if use_txt_in_month:
-            sMO = months[dt[mo]]
-        else:
-            if dt[mo] < 10:
-                sMO = "0" + str(dt[mo])
-            else:
-                sMO = str(dt[mo])
-        if dt[dd] < 10:
-            sDD = "0" + str(dt[dd])
-        else:
-            sDD = str(dt[dd])
-        if dt[hh] < 10:
-            sHH = "0" + str(dt[hh])
-        else:
-            sHH = str(dt[hh])
-        if not rtc_present:
-            if nHH_old != dt[hh]:
-                nHH_old = dt[hh]
-                ntp_refresh = True
-
-        if dt[mm] < 10:
-            sMM = "0" + str(dt[mm])
-        else:
-            sMM = str(dt[mm])
-        if dt[ss] < 10:
-            sSS = "0" + str(dt[ss])
-        else:
-            sSS = str(dt[ss])
-        current_seconds = dt[ss]
-        if use_usa_notation:
-            sDT = sMO + "-" + sDD + "-" + sYY
-        else:
-            sDT = sYY + "-" + sMO + "-" + sDD
-        if sDT_old != sDT:
-            sDT_old = sDT
-            dt_refresh = True  # The date has changed, set the refresh flag
-        sDT2 = sHH + ":" + sMM + ":" + sSS
-
-        if dt_refresh:  # only refresh when needed
-            dt_refresh = False
-            page_3_lbl.text = s
-            page_3_lbl2.text = sDT
-
-        if current_seconds != old_seconds:
-            old_seconds = current_seconds
-            sDT3 = s + "{} {}".format(sDT, sDT2)
-            print(sDT3)
-
-            page_3_lbl3.text = sDT2
-            if my_debug:
-                print("page_3_lbl.text = {}".format(page_3_lbl.text))
-                print("page_3_lbl2.text = {}".format(page_3_lbl2.text))
-                print("page_3_lbl3.text = {}".format(page_3_lbl3.text))
-            RetVal = True
-
-        # Return from here with a False but don't set the page_3_lbl to default.
-        # It is only to say to the loop() that we did't update the datetime
+        RetVal = handle_dt(dt)
     else:
-        page_3_lbl.text = page_3_lbl_default
-        page_3_lbl2.text = ""
-        page_3_lbl3.text = ""
-
+        pge3_lbl.text = pge3_lbl_dflt
+        pge3_lbl2.text = ""
+        pge3_lbl3.text = ""
     return RetVal
 
 
 def main():
-    global temp_sensor_present, rtc_present
-    # global test_page_layout, another_text
-    TAG = "main(): "
     cnt = 0
     while True:
         try:
@@ -484,8 +495,8 @@ def main():
             else:
                 connect_rtc()
 
-            if temp_sensor_present:
-                get_temp(cnt)
+            if t_sensor_present:
+                get_temp()
             else:
                 connect_temp_sensor()
 
